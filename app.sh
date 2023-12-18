@@ -8,11 +8,97 @@ individual_cpu_cores_data=()
 output_file_ram="memory_graph.txt"
 output_file_cpu="cpu_graph.txt"
 output_file_cpu_cores="cpu_cores_graph.txt"
-update_frequency=0.1
+system_information="system_information.txt"
+update_frequency=1
 
 
+get_device_model() {
+    system_profiler SPHardwareDataType | grep "Model Identifier" | awk -F: '{print $2}'
+}
+
+get_total_ram() {
+    system_profiler SPHardwareDataType | grep "Memory:" | awk -F: '{print $2}'
+}
+
+get_cpu_cores() {
+    sysctl -n hw.physicalcpu
+}
+
+get_gpu_cores() {
+    system_profiler SPDisplaysDataType | awk '/Total Number of Cores:/ {print $5}'
+}
+
+get_chipset_model() {
+    system_profiler SPDisplaysDataType | grep "Chipset Model" | awk -F: '{print $2}'
+}
+
+get_battery_max_capacity_percentage() {
+    system_profiler SPPowerDataType | grep "Maximum Capacity" | awk '{print $3}'
+}
+
+display_signal_strength() {
+    dBm_value=$1
+
+    if [ "$dBm_value" -ge -50 ]; then
+        echo "+++ (Excellent)"
+    elif [ "$dBm_value" -ge -60 ]; then
+        echo "++ (Good)"
+    elif [ "$dBm_value" -ge -70 ]; then
+        echo "+ (Fair)"
+    else
+        echo "- (Poor)"
+    fi
+}
+
+get_wifi_signal_strength() {
+    wifi_signal_strength=$(/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I | awk '/agrCtlRSSI/ {print $2}')
+    signal_representation=$(display_signal_strength $wifi_signal_strength)
+    echo "$wifi_signal_strength dBm ($signal_representation)"
+}
+
+
+
+
+usage() {
+    echo "  -i interval: Specify the update interval"
+}
+
+
+while [ $# -gt 1 ]; do
+    case "$1" in
+        -i) update_frequency="$2"; shift 2;;
+        --help) usage; exit 0;;
+        *) echo "Error: Invalid option $1"; usage; exit 1;;
+    esac
+done
 
 # separating for less confusion 
+
+
+# System Information
+# -----------------------------------------------------
+
+update_system_information() {
+    > $system_information
+
+
+    device_model=$(get_device_model)
+    total_ram=$(get_total_ram)
+    cpu_cores=$(get_cpu_cores)
+    gpu_cores=$(get_gpu_cores)
+    chipset_model=$(get_chipset_model)
+    battery_capacity=$(get_battery_max_capacity_percentage)
+    wifi_signal_strength=$(get_wifi_signal_strength)
+
+    echo -e "\033[1;34m--- System Information ---\033[0m" >> $system_information
+    echo -e "\033[0;33mDevice Model:\033[0m $device_model" >> $system_information
+    echo -e "\033[0;33mTotal RAM:\033[0m $total_ram" >> $system_information
+    echo -e "\033[0;33mCPU Cores:\033[0m $cpu_cores" >> $system_information
+    echo -e "\033[0;33mGPU Cores:\033[0m $gpu_cores" >> $system_information
+    echo -e "\033[0;33mChipset Model:\033[0m $chipset_model" >> $system_information
+    echo -e "\033[0;33mBattery Capacity:\033[0m $battery_capacity" >> $system_information
+    echo -e "\033[0;33mWiFi Signal Strength:\033[0m $wifi_signal_strength" >> $system_information
+}
 
 # RAM
 # -----------------------------------------------------
@@ -73,7 +159,7 @@ get_individual_cpu_cores_usage() {
     cpu_cores=$(sysctl -n hw.ncpu)
     total_cpu_usage=$(ps -A -o %cpu | awk '{sum+=$1} END {print sum}')
     
-    usage_per_core=$(echo "($total_cpu_usage / $cpu_cores) / $cpu_cores " | bc -l)
+    usage_per_core=$(echo "($total_cpu_usage / $cpu_cores) / $cpu_cores * 10" | bc -l)
 
     cpu_usages=()
     for ((i=0; i<cpu_cores; i++)); do
@@ -247,6 +333,9 @@ update_graph_cpu() {
 
 while true; do
 
+    # System Information
+    update_system_information
+
     # RAM
     memory_usage=$(get_memory_usage)
     memory_usage_gb=$(get_memory_usage_gb)
@@ -278,7 +367,8 @@ while true; do
 
 
     clear
-    paste $output_file_ram $output_file_cpu $output_file_cpu_cores
+    paste $output_file_ram $output_file_cpu $system_information
+    paste $output_file_cpu_cores
 
 
 
